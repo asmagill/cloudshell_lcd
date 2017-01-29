@@ -1,177 +1,245 @@
-#!/bin/bash
+#! /bin/bash
 
-# Hardkernel CloudShell Screen update
+# This is my take on the cloudshell_lcd script found at https://github.com/mdrjr/cloudshell_lcd/.
 #
-# requires the following packages:
-# curl sysstat
+# It is tailored for Arch Linux, but should probably run under any sufficiently modern
+# distribution that uses systemd.
 #
-# Tested on Ubuntu 14.04 Server image
+# Requires: curl, bc, con2fbmap (available at https://aur.archlinux.org/packages/con2fbmap)
+# Optional: nfs-utils, samba, netatalk
 
-############## Configuration
+export LANG="en_US.UTF-8"
 
-# console font
-# More fonts on: /usr/share/consolefonts
-export TERM="linux"
-export CONSOLE_FONT="Lat15-Fixed18"
-
-# Output Console (ttyX)
-export OUTPUT_CONSOLE="1"
+# CONSOLE_FONT="Lat15-Fixed18"
+CONSOLE_FONT="lat9u-16 -m 8859-1"
 
 # Network Interface: eth0, wlan0, ....
-export NETIF="eth0"
+NETIF="eth0"
 
 # SATA HDD mount
-export SATA="/dev/sda1"
+SATA="/dev/root"
 
 # Screen refresh in seconds
-export REFRESH="3"
+REFRESH="3"
 
 # CPU Temperature in C or F
-export TEMPERATURE_FORMAT="C"
+TEMPERATURE_FORMAT="F" # So sue me, I'm a philistine
 
 # External IP Refresh counts
 # The time to update the ip in counts is acquired by using the following formula
 # seconds_to_refresh = EXT_IP_REFRESH * REFRESH
-export EXT_IP_REFRESH="10"
+EXT_IP_REFRESH="100"
 
-get_external_ip() {
-	export EXTERNAL_IP=`/usr/bin/curl -s http://mdrjr.net/ip.php`
-}
+# tput requires a tty, so we have to fake it, code based on http://stackoverflow.com/a/20401674
+function faketty { script -qfc "$(printf "%q " "$@")" /dev/null ; }
 
-get_full_date() {
-	export DATE=`date +"%Y-%m-%d %H:%M:%S"`
-}
+# Colors used in the output
+COFF=$(faketty tput sgr0)
+CGREEN=$(faketty tput setaf 2)
+CRED=$(faketty tput setaf 1)
+CBLUE=$(faketty tput setaf 6)
 
-get_hostname() {
-	export HOSTNAME=`hostname`
-}
-
-get_internal_ip() {
-	export INTERNAL_IP=`ifconfig $NETIF | grep 'inet addr:'| cut -d: -f2 | awk '{ print $1}'`
-}
-
-get_net_tx_rx_realtime() {
-	net_txrx=`sar -n DEV 1 1 | grep $NETIF | tail -n 1 | gawk '{print $5" "$6}'`
-	# in MB/s
-	_tx=`echo $net_txrx | awk '{printf $1}'`
-	_rx=`echo $net_txrx | awk '{printf $2}'`
-	export NET_TX=`echo "scale=1; x=$_tx/1024; if(x<1) print 0; x" | bc`
-	export NET_RX=`echo "scale=1; x=$_rx/1024; if(x<1) print 0; x" | bc`
-	
-}
-
-get_disk_info() {
-	t=`df -h | grep $SATA`
-	export DISK_SIZE=`echo $t | awk '{printf $2}'`
-	export DISK_USED=`echo $t | awk '{printf $3}'`
-	export DISK_FREE=`echo $t | awk '{printf $4}'`
-	export DISK_USED_PCT=`echo $t | awk '{printf $5}'`
-}
-
-get_memory_info() {
-	# in Mbytes
-	export MEM_FREE=$[`cat /proc/meminfo | grep MemFree | awk '{print $2'}` / 1024]
-	export MEM_TOTAL=$[`cat /proc/meminfo | grep MemTotal | awk '{print $2'}` / 1024]
-	export MEM_USED=$[$MEM_TOTAL - $MEM_FREE]
-}
-
-get_cpu_usage() { 
-	cpufree=`mpstat 1 1 | tail -n 1 | awk '{printf $12}'`
-	export CPU_USAGE=`echo "scale=1; x=100-$cpufree; if(x<1) print 0; x" | bc`
-}
-
-get_cpu_temperature() {
-	_t=$[`cat /sys/class/thermal/thermal_zone0/temp` / 1000]
-	if [ "$TEMPERATURE_FORMAT" = "C" ]; then
-		export CPU_TEMP="$_t"C
-	else
-		_t1=$[ $_t * 9 / 5 + 32 ]
-		export CPU_TEMP="$_t1"F
-	fi
-}
-
-get_samba_connections() {
-	if [ ! -f /usr/bin/smbstatus ]; then
-		export SAMBA_CONNECTIONS=0
-	else
-		export SAMBA_CONNECTIONS=`smbstatus -b | grep -c ipv`
-	fi
-}
-
-get_nfs_connections() { 
-	export NFS_CONNECTIONS=`netstat -an | grep 2049 | grep -c ESTA`
-}
-
-get_process_count() { 
-	export PROCESS_COUNT=`ps xa | wc -l`
-}
-
-# local variables
 ext_ip_refresh_c=0
-COFF=$(tput sgr0)
-CGREEN=$(tput setaf 2)
-CRED=$(tput setaf 1)
-CBLUE=$(tput setaf 6)
-oc="/dev/tty$OUTPUT_CONSOLE"
+# this allows testing by outputting directly to the current TTY if no console is specified
+oc=$([ -n "$CLOUDSHELL_CONSOLE" ] && echo "/dev/tty$CLOUDSHELL_CONSOLE" || echo $(tty))
 
-# font setup
-setfont $CONSOLE_FONT > $oc
+# output unicode char by codepoint, code based on http://stackoverflow.com/a/16509364
+function unichr {
+    function _fast_chr {
+        local __octal
+        local __char
+        printf -v __octal '%03o' $1
+        printf -v __char \\$__octal
+        REPLY=$__char
+    }
+    if [[ $LANG == "C" ]]; then
+        echo -n " "
+    else
+        local c=$1  # ordinal of char
+        local l=0   # byte ctr
+        local o=63  # ceiling
+        local p=128 # accum. bits
+        local s=''  # output string
 
-# Ensure that we are in the right TTY
-chvt $OUTPUT_CONSOLE
+        (( c < 0x80 )) && { _fast_chr "$c"; echo -n "$REPLY"; return; }
+
+        while (( c > o )); do
+            _fast_chr $(( t = 0x80 | c & 0x3f ))
+            s="$REPLY$s"
+            (( c >>= 6, l++, p += o+1, o>>=1 ))
+        done
+
+        _fast_chr $(( t = p | c ))
+        echo -n "$REPLY$s"
+    fi
+}
+
+# in case HDMI monitor is plugged in, choose the right frame buffer
+if [ -n "$CLOUDSHELL_CONSOLE" ]; then
+    con2fbmap $CLOUDSHELL_CONSOLE $(fbset -fb /dev/fb0 -i | egrep '^\s+Name\s+: fb_ili9340$' 2>&1 > /dev/null && echo 0 || echo 1)
+fi
+
+function get_external_ip {
+    EXTERNAL_IP=$(/usr/bin/curl -s http://eth0.me)
+#     EXTERNAL_IP=$(/usr/bin/curl -s http://mdrjr.net/ip.php)
+}
+
+function get_full_date { echo $(date +"%Y-%m-%d %H:%M:%S"); }
+
+function get_hostname { echo $(hostname); }
+
+function get_internal_ip { echo $(hostname -i | cut -d' ' -f1); }
+#
+# sar causes my auto-mounts to be mounted all of the time, so I don't like it...
+function netstats {
+    r1=$(cat /sys/class/net/$1/statistics/rx_bytes)
+    t1=$(cat /sys/class/net/$1/statistics/tx_bytes)
+    sleep $2
+    r2=$(cat /sys/class/net/$1/statistics/rx_bytes)
+    t2=$(cat /sys/class/net/$1/statistics/tx_bytes)
+    tk=$(echo "scale=2; ($t2 - $t1) / 1024" | bc)
+    rk=$(echo "scale=2; ($r2 - $r1) / 1024" | bc)
+    echo $tk $rk
+}
+
+function get_net_tx_rx_realtime {
+#    net_txrx=$(sar -n DEV 1 1 | grep $NETIF | tail -n 1 | gawk '{print $5" "$6}')
+    # in MB/s
+    net_txrx=$(netstats $NETIF 1)
+    _tx=$(echo $net_txrx | awk '{printf $1}')
+    _rx=$(echo $net_txrx | awk '{printf $2}')
+    NET_TX=$(echo "scale=2; x=$_tx/1024; if(x<1) print 0; x" | bc)
+    [ "$NET_TX" == "00" ] && NET_TX="0.00"
+    NET_RX=$(echo "scale=2; x=$_rx/1024; if(x<1) print 0; x" | bc)
+    [ "$NET_RX" == "00" ] && NET_RX="0.00"
+}
+
+function get_disk_info {
+    t=$(df -h | grep $SATA)
+    DISK_SIZE=$(echo $t | awk '{printf $2}')
+    DISK_USED=$(echo $t | awk '{printf $3}')
+    DISK_FREE=$(echo $t | awk '{printf $4}')
+    DISK_USED_PCT=$(echo $t | awk '{printf $5}')
+}
+
+function get_memory_info {
+    # in Mbytes
+    MEM_FREE=$[$(cat /proc/meminfo | grep MemFree | awk '{print $2}') / 1024]
+    MEM_TOTAL=$[$(cat /proc/meminfo | grep MemTotal | awk '{print $2}') / 1024]
+    MEM_USED=$[$MEM_TOTAL - $MEM_FREE]
+}
+
+function get_cpu_usage {
+    cpufree=$(mpstat 1 1 | tail -n 1 | awk '{printf $12}')
+    CPU_USAGE=$(echo "scale=2; x=100-$cpufree; if(x<1) print 0; x" | bc)
+    [ "$CPU_USAGE" == "00" ] && CPU_USAGE="0.00"
+    echo $CPU_USAGE
+}
+
+function get_cpu_temperature {
+    _t=$[$(cat /sys/class/thermal/thermal_zone0/temp) / 1000]
+    if [ "$TEMPERATURE_FORMAT" = "C" ]; then
+        echo "$_t$(unichr 0x00B0)C"
+    else
+        _t1=$[ $_t * 9 / 5 + 32 ]
+        echo "$_t1$(unichr 0x00B0)F"
+    fi
+}
+
+function get_samba_connections {
+     if [ ! -f /usr/bin/smbstatus ]; then
+         SAMBA_CONNECTIONS=0
+     else
+         SAMBA_CONNECTIONS=$(smbstatus -b | grep -c ipv)
+     fi
+     echo $SAMBA_CONNECTIONS
+}
+
+function get_afp_connections {
+     if [ ! -f /usr/bin/afpstats ]; then
+         AFP_CONNECTIONS=0
+     else
+         AFP_CONNECTIONS=$(afpstats | wc -l)
+     fi
+     echo $AFP_CONNECTIONS
+}
+
+function get_nfs_connections { echo $(netstat -an | grep 2049 | grep -c ESTA); }
+
+function get_process_count { echo $(ps xa | wc -l); }
+
+if [ -n "$CLOUDSHELL_CONSOLE" ]; then
+    # Ensure that we are in the right TTY
+    chvt $CLOUDSHELL_CONSOLE
+
+    # font setup
+    setfont -C $oc $CONSOLE_FONT > $oc
+
+    # prevent screen sleep on virtual console
+    setterm --blank 0 --powersave off --blink off --cursor off > $oc
+fi
 
 # infinite loop
 while true; do
 
-	# Ensure that we are in the right TTY
-	chvt $OUTPUT_CONSOLE
+    # Ensure that we are in the right TTY
+# I sometimes run dual headed, so I don't want this changing on me
+#     chvt $CLOUDSHELL_CONSOLE
 
-	# check if EXT_IP_REFRESH
-	if (( ($ext_ip_refresh_c % $EXT_IP_REFRESH) == 0 )); then
-		get_external_ip
-	fi
-	
-	# increment $ext_ip_refresh_c
-	ext_ip_refresh_c=$[$ext_ip_refresh_c+1]
+    # check if EXT_IP_REFRESH
+    if (( ($ext_ip_refresh_c % $EXT_IP_REFRESH) == 0 )); then
+        get_external_ip
+    fi
 
-	# get data
-	get_internal_ip
-	get_hostname
-	get_disk_info
-	get_full_date
-	get_net_tx_rx_realtime
-	get_memory_info
-	get_cpu_usage
-	get_cpu_temperature
-	get_samba_connections
-	get_nfs_connections
-    get_process_count
-    	
-	# clear the screen every loop
-	# we only wipe the screen when we are ready to write data to it
-	clear > $oc
+    # increment $ext_ip_refresh_c
+    ext_ip_refresh_c=$[$ext_ip_refresh_c+1]
 
-	# format the data on screen
-	echo "" > $oc
-	echo -e "$CBLUE $HOSTNAME $COFF: $DATE" > $oc
-    echo "" > $oc
-	# line CPU Usage
-	echo -e "CPU Usage: $CBLUE$CPU_USAGE%$COFF   CPU Temp: $CBLUE$CPU_TEMP$COFF" > $oc
+    # get data
+    get_disk_info
+    get_net_tx_rx_realtime
+    get_memory_info
+
+    output="\n"
+    output+="      $CBLUE$(get_hostname) $COFF: $(get_full_date)\n"
+    output+="\n"
+    # line CPU Usage
+    output+="   CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
     # Line Memory
-    echo -e "Memory Free: $CBLUE$MEM_FREE MB$COFF   Used: $CBLUE$MEM_USED MB$COFF" > $oc
-	# Line IP Addresses
-	echo -e "IP: $CBLUE$INTERNAL_IP$COFF   Rem: $CBLUE$EXTERNAL_IP$COFF" > $oc
-	# Line network usage
-	echo -e "TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF" > $oc
-	# Line Disk Space
-	echo -e "Disk Used: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF)  Free: $CBLUE$DISK_FREE$COFF" > $oc
-    # Line Samba
-    echo -e "Samba Clients: $CBLUE$SAMBA_CONNECTIONS$COFF" > $oc
-    # line NFS
-    echo -e "NFS Connections: $CBLUE$NFS_CONNECTIONS$COFF" > $oc
-	# line Processes
-	echo -e "Processes Running: $CBLUE$PROCESS_COUNT$COFF" > $oc
+    output+="   Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
+    # Line IP Addresses
+    output+="   IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
+    # Line network usage
+    output+="   TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
+    # Line Disk Space
+    output+="   Disk Used: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
+    output+="\n"
 
-	# sleep
-	sleep $REFRESH
+    # Line Netatalk
+    systemctl list-unit-files | egrep '^netatalk.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        output+="       $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        output+=" Netatalk Clients: $CBLUE$(get_afp_connections)$COFF\n"
+    fi
+    # Line Samba
+    systemctl list-unit-files | egrep '^smbd.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        output+="       $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        output+=" Samba Clients: $CBLUE$(get_samba_connections)$COFF\n"
+    fi
+    # line NFS
+    systemctl list-unit-files | egrep '^nfs-server.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        output+="       $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        output+=" NFS Connections: $CBLUE$(get_nfs_connections)$COFF\n"
+    fi
+    output+="\n"
+
+    # line Processes
+    output+="   Processes Running: $CBLUE$(get_process_count)$COFF"
+
+    # clear and output updated stats
+    clear > $oc
+    echo -e "$output" > $oc
+    if [ -z "$CLOUDSHELL_CONSOLE" ]; then break ; fi
+    sleep $REFRESH
 done

@@ -5,9 +5,10 @@ Requires=sysinit.target
 After=sysinit.target
 
 [Service]
+Environment=TERM=linux
+Environment=CLOUDSHELL_CONSOLE=9
 Type=simple
-ExecStart=/bin/cloudshell
+ExecStart=/usr/bin/cloudshell
 
 [Install]
-WantedBy=basic.target
-WantedBy=sysinit.target
+WantedBy=multi-user.target
