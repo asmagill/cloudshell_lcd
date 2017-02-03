@@ -25,9 +25,12 @@ REFRESH="3"
 # CPU Temperature in C or F
 TEMPERATURE_FORMAT="F" # So sue me, I'm a philistine
 
+# Number of screens to cycle through
+MAX_SCREENS=2
+
 # External IP Refresh counts
 # The time to update the ip in counts is acquired by using the following formula
-# seconds_to_refresh = EXT_IP_REFRESH * REFRESH
+# seconds_to_refresh = EXT_IP_REFRESH * MAX_SCREENS * REFRESH
 EXT_IP_REFRESH="100"
 
 # tput requires a tty, so we have to fake it, code based on http://stackoverflow.com/a/20401674
@@ -38,6 +41,8 @@ COFF=$(faketty tput sgr0)
 CGREEN=$(faketty tput setaf 2)
 CRED=$(faketty tput setaf 1)
 CBLUE=$(faketty tput setaf 6)
+
+CURRENT_SCREEN=0
 
 ext_ip_refresh_c=0
 # this allows testing by outputting directly to the current TTY if no console is specified
@@ -168,6 +173,94 @@ function get_nfs_connections { echo $(netstat -an | grep 2049 | grep -c ESTA); }
 
 function get_process_count { echo $(ps xa | wc -l); }
 
+function screen0 {
+    # check if EXT_IP_REFRESH
+    if (( ($ext_ip_refresh_c % $EXT_IP_REFRESH) == 0 )); then
+        get_external_ip
+    fi
+
+    # increment $ext_ip_refresh_c
+    ext_ip_refresh_c=$[$ext_ip_refresh_c+1]
+
+    # get data
+    get_disk_info
+    get_net_tx_rx_realtime
+    get_memory_info
+
+    # line CPU Usage
+    results="   CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
+    # Line Memory
+    results+="   Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
+    # Line IP Addresses
+    results+="   IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
+    # Line network usage
+    results+="   TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
+    # Line Disk Space
+    results+="   Disk Used: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
+    results+="\n"
+
+    # Line Netatalk
+    systemctl list-unit-files | egrep '^netatalk.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        results+="       $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=" Netatalk Clients: $CBLUE$(get_afp_connections)$COFF\n"
+    fi
+    # Line Samba
+    systemctl list-unit-files | egrep '^smbd.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        results+="       $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=" Samba Clients: $CBLUE$(get_samba_connections)$COFF\n"
+    fi
+    # line NFS
+    systemctl list-unit-files | egrep '^nfs-server.service' > /dev/null
+    if [ $? -eq 0 ]; then
+        results+="       $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=" NFS Connections: $CBLUE$(get_nfs_connections)$COFF\n"
+    fi
+    results+="\n"
+
+    # line Processes
+    results+="   Processes Running: $CBLUE$(get_process_count)$COFF"
+    echo -e "$results"
+}
+
+function attachedCapacity {
+    cap=$(cat /proc/partitions | egrep 'sd[a-z]$' | awk '{s += $3} END {print s}')
+    if [ $cap -lt $[ 1024 * 1024 ] ]; then
+        cap=$(echo "scale=2; $cap/1024" | bc)
+        cap="$cap MB"
+    elif [ $cap -lt $[ 1024 * 1024 * 1024 ] ]; then
+        cap=$(echo "scale=2; $cap/1024/1024" | bc)
+        cap="$cap GB"
+    else
+        cap=$(echo "scale=2; $cap/1024/1024/1024" | bc)
+        cap="$cap TB"
+    fi
+    echo $cap
+}
+
+function screen1 {
+    results="  Attached Drives: $CBLUE$(cat /proc/partitions | egrep 'sd[a-z]$' | wc -l)$COFF"
+    results+=" Capacity $CBLUE$(attachedCapacity)$COFF\n"
+    results+="      Partitions Mounted: $CBLUE$(df -h | grep /dev/sd | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
+    results+="\n"
+    # df -h | grep /dev/sd | head -8 | awk '{printf "%-15.15s %4s / %4s free (%4s)\n", $6, $4, $2, $5}'
+
+    while read -r line; do
+        IFS=';' read -r -a array <<< "$line"
+        percent=${array[3]}
+        [ ${percent%\%} -le 75 ] && results+="$CGREEN" || results+="$CRED"
+        results+=$(printf "%4s$COFF " "${array[3]}")
+        results+=$(printf "%-17.17s $CBLUE%4s$COFF / $CBLUE%4s$COFF free" "${array[0]}" "${array[1]}" "${array[2]}")
+
+        results+="\n"
+    done <<< "$(df -h | grep /dev/sd | head -8 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
+
+    # offset extra sleep caused by screen0 calculating network and cpu statistics
+    sleep 2
+    echo -e "$results"
+}
+
 if [ -n "$CLOUDSHELL_CONSOLE" ]; then
     # Ensure that we are in the right TTY
     chvt $CLOUDSHELL_CONSOLE
@@ -186,60 +279,21 @@ while true; do
 # I sometimes run dual headed, so I don't want this changing on me
 #     chvt $CLOUDSHELL_CONSOLE
 
-    # check if EXT_IP_REFRESH
-    if (( ($ext_ip_refresh_c % $EXT_IP_REFRESH) == 0 )); then
-        get_external_ip
-    fi
-
-    # increment $ext_ip_refresh_c
-    ext_ip_refresh_c=$[$ext_ip_refresh_c+1]
-
-    # get data
-    get_disk_info
-    get_net_tx_rx_realtime
-    get_memory_info
 
     output="\n"
     output+="      $CBLUE$(get_hostname) $COFF: $(get_full_date)\n"
     output+="\n"
-    # line CPU Usage
-    output+="   CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
-    # Line Memory
-    output+="   Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
-    # Line IP Addresses
-    output+="   IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
-    # Line network usage
-    output+="   TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
-    # Line Disk Space
-    output+="   Disk Used: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
-    output+="\n"
 
-    # Line Netatalk
-    systemctl list-unit-files | egrep '^netatalk.service' > /dev/null
-    if [ $? -eq 0 ]; then
-        output+="       $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        output+=" Netatalk Clients: $CBLUE$(get_afp_connections)$COFF\n"
+    if [ $CURRENT_SCREEN == 0 ]; then
+        output+=$(screen0)
+    elif [ $CURRENT_SCREEN == 1 ]; then
+        output+=$(screen1)
     fi
-    # Line Samba
-    systemctl list-unit-files | egrep '^smbd.service' > /dev/null
-    if [ $? -eq 0 ]; then
-        output+="       $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        output+=" Samba Clients: $CBLUE$(get_samba_connections)$COFF\n"
-    fi
-    # line NFS
-    systemctl list-unit-files | egrep '^nfs-server.service' > /dev/null
-    if [ $? -eq 0 ]; then
-        output+="       $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        output+=" NFS Connections: $CBLUE$(get_nfs_connections)$COFF\n"
-    fi
-    output+="\n"
-
-    # line Processes
-    output+="   Processes Running: $CBLUE$(get_process_count)$COFF"
+    CURRENT_SCREEN=$[ ( $CURRENT_SCREEN + 1 ) % $MAX_SCREENS ]
 
     # clear and output updated stats
-    clear > $oc
+    [ -n "$CLOUDSHELL_CONSOLE" ] && clear > $oc || echo "----------------------------------------" > $oc
     echo -e "$output" > $oc
-    if [ -z "$CLOUDSHELL_CONSOLE" ]; then break ; fi
-    sleep $REFRESH
+    [ -z "$CLOUDSHELL_CONSOLE" ] && [ $CURRENT_SCREEN == 0 ] && break
+    [ -n "$CLOUDSHELL_CONSOLE" ] && sleep $REFRESH
 done
