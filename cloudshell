@@ -20,7 +20,7 @@ NETIF="eth0"
 SATA="/dev/root"
 
 # Screen refresh in seconds
-REFRESH="3"
+REFRESH=${CLOUDSHELL_REFRESH:-5}
 
 # CPU Temperature in C or F
 TEMPERATURE_FORMAT="F" # So sue me, I'm a philistine
@@ -188,39 +188,39 @@ function screen0 {
     get_memory_info
 
     # line CPU Usage
-    results="   CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
+    results="    CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
     # Line Memory
-    results+="   Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
+    results+="    Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
     # Line IP Addresses
-    results+="   IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
+    results+="    IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
     # Line network usage
-    results+="   TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
+    results+="    TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
     # Line Disk Space
-    results+="   Disk Used: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
+    results+="    Root Disk: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
     results+="\n"
 
     # Line Netatalk
     systemctl list-unit-files | egrep '^netatalk.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="       $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+="         $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
         results+=" Netatalk Clients: $CBLUE$(get_afp_connections)$COFF\n"
     fi
     # Line Samba
     systemctl list-unit-files | egrep '^smbd.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="       $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+="         $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
         results+=" Samba Clients: $CBLUE$(get_samba_connections)$COFF\n"
     fi
     # line NFS
     systemctl list-unit-files | egrep '^nfs-server.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="       $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+="         $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
         results+=" NFS Connections: $CBLUE$(get_nfs_connections)$COFF\n"
     fi
     results+="\n"
 
     # line Processes
-    results+="   Processes Running: $CBLUE$(get_process_count)$COFF"
+    results+="    Processes Running: $CBLUE$(get_process_count)$COFF"
     echo -e "$results"
 }
 
