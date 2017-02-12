@@ -1,0 +1,18 @@
+#! /bin/bash
+
+# autofs considers the statfs performed by df as a reason to reset the
+# dismount timer... we use this too much for monitoring, so... this
+# gets run by cron to unmount drives we're not using atm.
+
+# currently you have to do this by hand... put this somewhere and then
+# add something like the following to root's crontab (requires cronie
+# package):
+# */5 * * * * /usr/local/bin/auto-dismounter
+
+# modify CONFIG and what it greps for to match your mount points
+
+CONFIG=/etc/autofs/auto.master.d/externals.direct
+
+for drive in $(cat $CONFIG | egrep '^/export' | awk '{ print $1 }'); do
+  umount $drive > /dev/null 2>&1
+done

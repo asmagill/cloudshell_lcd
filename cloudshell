@@ -120,7 +120,8 @@ function get_net_tx_rx_realtime {
 }
 
 function get_disk_info {
-    t=$(df -h | grep $SATA)
+#     t=$(df -h | grep $SATA)
+    t=$(df -h / | tail -1)
     DISK_SIZE=$(echo $t | awk '{printf $2}')
     DISK_USED=$(echo $t | awk '{printf $3}')
     DISK_FREE=$(echo $t | awk '{printf $4}')
@@ -242,11 +243,15 @@ function attachedCapacity {
 function screen1 {
     results="  Attached Drives: $CBLUE$(cat /proc/partitions | egrep 'sd[a-z]$' | wc -l)$COFF"
     results+=" Capacity $CBLUE$(attachedCapacity)$COFF\n"
-    results+="      Partitions Mounted: $CBLUE$(df -h | grep /dev/sd | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
+#     results+="      Partitions Mounted: $CBLUE$(df -h | grep /dev/sd | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
+    results+="      Partitions Mounted: $CBLUE$(egrep '^/dev/sd' /etc/mtab | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
+
     results+="\n"
     # df -h | grep /dev/sd | head -8 | awk '{printf "%-15.15s %4s / %4s free (%4s)\n", $6, $4, $2, $5}'
 
-    while read -r line; do
+    for mtpt in $(egrep '^/dev/sd' /etc/mtab | head -8 | awk '{ print $2 }'); do
+#     while read -r line; do
+        line="$(df -h $mtpt | tail -1 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
         IFS=';' read -r -a array <<< "$line"
         percent=${array[3]}
         [ ${percent%\%} -le 75 ] && results+="$CGREEN" || results+="$CRED"
@@ -254,7 +259,8 @@ function screen1 {
         results+=$(printf "%-17.17s $CBLUE%4s$COFF / $CBLUE%4s$COFF free" "${array[0]}" "${array[1]}" "${array[2]}")
 
         results+="\n"
-    done <<< "$(df -h | grep /dev/sd | head -8 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
+#     done <<< "$(df -h | grep /dev/sd | head -8 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
+    done
 
     # offset extra sleep caused by screen0 calculating network and cpu statistics
     sleep 2
