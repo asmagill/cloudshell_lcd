@@ -10,6 +10,8 @@
 
 export LANG="en_US.UTF-8"
 
+VERSION="0.3"
+
 # CONSOLE_FONT="Lat15-Fixed18"
 CONSOLE_FONT="lat9u-16 -m 8859-1"
 
@@ -26,7 +28,7 @@ REFRESH=${CLOUDSHELL_REFRESH:-5}
 TEMPERATURE_FORMAT="F" # So sue me, I'm a philistine
 
 # Number of screens to cycle through
-MAX_SCREENS=2
+MAX_SCREENS=3
 
 # External IP Refresh counts
 # The time to update the ip in counts is acquired by using the following formula
@@ -78,6 +80,11 @@ function unichr {
         echo -n "$REPLY$s"
     fi
 }
+
+# aparently spi doesn't always initialize fast enough for the fbtft_device
+# module, so load it here again, just in case...
+modprobe fbtft_device 2>&1 > /dev/null
+sleep 1
 
 # in case HDMI monitor is plugged in, choose the right frame buffer
 if [ -n "$CLOUDSHELL_CONSOLE" ]; then
@@ -144,12 +151,13 @@ function get_cpu_usage {
 
 function get_cpu_temperature {
     _t=$[$(cat /sys/class/thermal/thermal_zone0/temp) / 1000]
-    if [ "$TEMPERATURE_FORMAT" = "C" ]; then
-        echo "$_t$(unichr 0x00B0)C"
-    else
-        _t1=$[ $_t * 9 / 5 + 32 ]
-        echo "$_t1$(unichr 0x00B0)F"
-    fi
+    _t1=$[ $_t * 9 / 5 + 32 ]
+#    if [ "$TEMPERATURE_FORMAT" = "C" ]; then
+#        echo "$_t$(unichr 0x00B0)C"
+#    else
+#        echo "$_t1$(unichr 0x00B0)F"
+#    fi
+    echo "$_t$(unichr 0x00B0)C/$_t1$(unichr 0x00B0)F"
 }
 
 function get_samba_connections {
@@ -189,7 +197,7 @@ function screen0 {
     get_memory_info
 
     # line CPU Usage
-    results="    CPU Usage: $CBLUE$(get_cpu_usage)%$COFF CPU Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
+    results="    CPU: $CBLUE$(get_cpu_usage)%$COFF Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
     # Line Memory
     results+="    Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
     # Line IP Addresses
@@ -244,12 +252,12 @@ function screen1 {
     results="  Attached Drives: $CBLUE$(cat /proc/partitions | egrep 'sd[a-z]$' | wc -l)$COFF"
     results+=" Capacity $CBLUE$(attachedCapacity)$COFF\n"
 #     results+="      Partitions Mounted: $CBLUE$(df -h | grep /dev/sd | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
-    results+="      Partitions Mounted: $CBLUE$(egrep '^/dev/sd' /etc/mtab | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
+    results+="      Partitions Mounted: $CBLUE$(egrep '^/dev/[sm]d' /etc/mtab | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep '[sm]d[a-z]?[0-9]+$' | wc -l)$COFF\n"
 
     results+="\n"
     # df -h | grep /dev/sd | head -8 | awk '{printf "%-15.15s %4s / %4s free (%4s)\n", $6, $4, $2, $5}'
 
-    for mtpt in $(egrep '^/dev/sd' /etc/mtab | head -8 | awk '{ print $2 }'); do
+    for mtpt in $(egrep '^/dev/[sm]d' /etc/mtab | head -8 | awk '{ print $2 }'); do
 #     while read -r line; do
         line="$(df -h $mtpt | tail -1 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
         IFS=';' read -r -a array <<< "$line"
@@ -261,6 +269,14 @@ function screen1 {
         results+="\n"
 #     done <<< "$(df -h | grep /dev/sd | head -8 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
     done
+
+    # offset extra sleep caused by screen0 calculating network and cpu statistics
+    sleep 2
+    echo -e "$results"
+}
+
+function screen2 {
+    results=$(cat /proc/mdstat | sed -re 's/ +/ /g' -e 's/ = / /g' -e 's/^md/ md/g' -e 's/ chunk//g' | cut -c 1-40 | tail +2 | head -n -2 | sed -re "s/([sm]d[a-z]?[0-9]+)/${CBLUE}\1${COFF}/g" -e "s/U/${CGREEN}U${COFF}/g" -e "s/_/${CRED}_${COFF}/g")
 
     # offset extra sleep caused by screen0 calculating network and cpu statistics
     sleep 2
@@ -286,14 +302,18 @@ while true; do
 #     chvt $CLOUDSHELL_CONSOLE
 
 
-    output="\n"
-    output+="      $CBLUE$(get_hostname) $COFF: $(get_full_date)\n"
-    output+="\n"
+#    output="\n"
+#    output+="      $CBLUE$(get_hostname) $COFF: $(get_full_date)\n"
+#    output+="\n"
+    output="    $CBLUE$(get_hostname)$COFF :: $(uname -r) :: ${CBLUE}v${VERSION}${COFF}\n"
+    output+="          $CGREEN$(get_full_date)$COFF\n\n"
 
     if [ $CURRENT_SCREEN == 0 ]; then
         output+=$(screen0)
     elif [ $CURRENT_SCREEN == 1 ]; then
         output+=$(screen1)
+    elif [ $CURRENT_SCREEN == 2 ]; then
+        output+=$(screen2)
     fi
     CURRENT_SCREEN=$[ ( $CURRENT_SCREEN + 1 ) % $MAX_SCREENS ]
 
