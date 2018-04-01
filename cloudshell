@@ -10,10 +10,11 @@
 
 export LANG="en_US.UTF-8"
 
-VERSION="0.3"
+VERSION="0.4"
 
 # CONSOLE_FONT="Lat15-Fixed18"
-CONSOLE_FONT="lat9u-16 -m 8859-1"
+#CONSOLE_FONT="lat9u-16 -m 8859-1"
+CONSOLE_FONT="lat9w-16 -m 8859-1"
 
 # Network Interface: eth0, wlan0, ....
 NETIF="eth0"
@@ -197,34 +198,45 @@ function screen0 {
     get_memory_info
 
     # line CPU Usage
-    results="    CPU: $CBLUE$(get_cpu_usage)%$COFF Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
+    results=" CPU: $CBLUE$(get_cpu_usage)%$COFF Temp: $CBLUE$(get_cpu_temperature)$COFF\n"
+    results+="\n"
     # Line Memory
-    results+="    Memory Free: $CBLUE$MEM_FREE MB$COFF Used: $CBLUE$MEM_USED MB$COFF\n"
+    results+=$(printf "   Memory Free: $CBLUE%4d MB$COFF" $MEM_FREE)
+    results+="\n"
+    results+=$(printf "   Memory Used: $CBLUE%4d MB$COFF" $MEM_USED)
+    results+="\n\n"
     # Line IP Addresses
-    results+="    IP: $CBLUE$(get_internal_ip)$COFF Rem: $CBLUE$EXTERNAL_IP$COFF\n"
+    results+=$(printf "   Local IP:  $CBLUE%-15s$COFF" $(get_internal_ip))
+    results+="\n"
+    results+=$(printf "   Remote IP: $CBLUE%-15s$COFF" $EXTERNAL_IP)
+    results+="\n"
     # Line network usage
-    results+="    TX: $CBLUE$NET_TX MB/s$COFF RX: $CBLUE$NET_RX MB/s$COFF\n"
+    results+="   TX/RX: $CBLUE$NET_TX$COFF/$CBLUE$NET_RX MB/s$COFF\n"
+    results+="\n"
     # Line Disk Space
-    results+="    Root Disk: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
+    results+=" Root: $CBLUE$DISK_USED$COFF ($CBLUE$DISK_USED_PCT$COFF) Free: $CBLUE$DISK_FREE$COFF\n"
     results+="\n"
 
     # Line Netatalk
     systemctl list-unit-files | egrep '^netatalk.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="         $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        results+=" Netatalk Clients: $CBLUE$(get_afp_connections)$COFF\n"
+        results+="    $(systemctl is-active netatalk.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=$(printf " Netatalk Clients: $CBLUE%3d$COFF" $(get_afp_connections))
+        results+="\n"
     fi
     # Line Samba
     systemctl list-unit-files | egrep '^smbd.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="         $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        results+=" Samba Clients: $CBLUE$(get_samba_connections)$COFF\n"
+        results+="    $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=$(printf " Samba Clients:    $CBLUE%3d$COFF" $(get_samba_connections))
+        results+="\n"
     fi
     # line NFS
     systemctl list-unit-files | egrep '^nfs-server.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="         $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
-        results+=" NFS Connections: $CBLUE$(get_nfs_connections)$COFF\n"
+        results+="    $(systemctl is-active nfs-server.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+=$(printf " NFS Connections:  $CBLUE%3d$COFF" $(get_nfs_connections))
+        results+="\n"
     fi
     results+="\n"
 
@@ -249,10 +261,10 @@ function attachedCapacity {
 }
 
 function screen1 {
-    results="  Attached Drives: $CBLUE$(cat /proc/partitions | egrep 'sd[a-z]$' | wc -l)$COFF"
-    results+=" Capacity $CBLUE$(attachedCapacity)$COFF\n"
+    results="  Attached Drives: $CBLUE$(cat /proc/partitions | egrep 'sd[a-z]$' | wc -l)$COFF\n"
+    results+="         Capacity: $CBLUE$(attachedCapacity)$COFF\n"
 #     results+="      Partitions Mounted: $CBLUE$(df -h | grep /dev/sd | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep 'sd[a-z][0-9]+$' | wc -l)$COFF\n"
-    results+="      Partitions Mounted: $CBLUE$(egrep '^/dev/[sm]d' /etc/mtab | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep '[sm]d[a-z]?[0-9]+$' | wc -l)$COFF\n"
+    results+="          Mounted: $CBLUE$(egrep '^/dev/[sm]d' /etc/mtab | wc -l)$COFF of $CBLUE$(cat /proc/partitions | egrep '[sm]d[a-z]?[0-9]+$' | wc -l)$COFF\n"
 
     results+="\n"
     # df -h | grep /dev/sd | head -8 | awk '{printf "%-15.15s %4s / %4s free (%4s)\n", $6, $4, $2, $5}'
@@ -264,7 +276,7 @@ function screen1 {
         percent=${array[3]}
         [ ${percent%\%} -le 75 ] && results+="$CGREEN" || results+="$CRED"
         results+=$(printf "%4s$COFF " "${array[3]}")
-        results+=$(printf "%-17.17s $CBLUE%4s$COFF / $CBLUE%4s$COFF free" "${array[0]}" "${array[1]}" "${array[2]}")
+        results+=$(printf "%-20.20s\n            $CBLUE%4s$COFF / $CBLUE%4s$COFF free" "${array[0]}" "${array[1]}" "${array[2]}")
 
         results+="\n"
 #     done <<< "$(df -h | grep /dev/sd | head -8 | awk '{printf "%s;%s;%s;%s\n", $6, $4, $2, $5}')"
@@ -276,7 +288,18 @@ function screen1 {
 }
 
 function screen2 {
-    results=$(cat /proc/mdstat | sed -re 's/ +/ /g' -e 's/ = / /g' -e 's/^md/ md/g' -e 's/ chunk//g' | cut -c 1-40 | tail +2 | head -n -2 | sed -re "s/([sm]d[a-z]?[0-9]+)/${CBLUE}\1${COFF}/g" -e "s/U/${CGREEN}U${COFF}/g" -e "s/_/${CRED}_${COFF}/g")
+#     results=$(cat /proc/mdstat | sed -re 's/ +/ /g' -e 's/ = / /g' -e 's/^md/ md/g' -e 's/ chunk//g' | cut -c 1-40 | tail +2 | head -n -2 | sed -re "s/([sm]d[a-z]?[0-9]+)/${CBLUE}\1${COFF}/g" -e "s/U/${CGREEN}U${COFF}/g" -e "s/_/${CRED}_${COFF}/g")
+
+    results=$(cat /proc/mdstat | tail +2 | head -n -2 | sed -re 's/ +/ /g' \
+                                                            -e  's/ = / /g' \
+                                                            -e  's/^md/ md/g' \
+                                                            -re 's/ raid[0-9]+/&\n /g' \
+                                                            -re 's/ [0-9]+ blocks/ /' \
+                                                            -e  's/bitmap/ &/' \
+                                                            -re 's/, [0-9]+KB chunk//' \
+                                                            -re "s/([sm]d[a-z]?[0-9]+)/${CBLUE}\1${COFF}/g" \
+                                                            -e  "s/U/${CGREEN}U${COFF}/g" \
+                                                            -e  "s/_/${CRED}_${COFF}/g")
 
     # offset extra sleep caused by screen0 calculating network and cpu statistics
     sleep 2
@@ -305,8 +328,8 @@ while true; do
 #    output="\n"
 #    output+="      $CBLUE$(get_hostname) $COFF: $(get_full_date)\n"
 #    output+="\n"
-    output="    $CBLUE$(get_hostname)$COFF :: $(uname -r) :: ${CBLUE}v${VERSION}${COFF}\n"
-    output+="          $CGREEN$(get_full_date)$COFF\n\n"
+    output=" $CBLUE$(get_hostname)$COFF : $(uname -r)/${CBLUE}v${VERSION}${COFF}\n"
+    output+="      $CGREEN$(get_full_date)$COFF\n\n"
 
     if [ $CURRENT_SCREEN == 0 ]; then
         output+=$(screen0)
@@ -318,7 +341,7 @@ while true; do
     CURRENT_SCREEN=$[ ( $CURRENT_SCREEN + 1 ) % $MAX_SCREENS ]
 
     # clear and output updated stats
-    [ -n "$CLOUDSHELL_CONSOLE" ] && clear > $oc || echo "----------------------------------------" > $oc
+    [ -n "$CLOUDSHELL_CONSOLE" ] && clear > $oc || echo "------------------------------" > $oc
     echo -e "$output" > $oc
     [ -z "$CLOUDSHELL_CONSOLE" ] && [ $CURRENT_SCREEN == 0 ] && break
     [ -n "$CLOUDSHELL_CONSOLE" ] && sleep $REFRESH
