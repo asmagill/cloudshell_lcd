@@ -225,9 +225,9 @@ function screen0 {
         results+="\n"
     fi
     # Line Samba
-    systemctl list-unit-files | egrep '^smbd.service' > /dev/null
+    systemctl list-unit-files | egrep '^smb.service' > /dev/null
     if [ $? -eq 0 ]; then
-        results+="    $(systemctl is-active smbd.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
+        results+="    $(systemctl is-active smb.service > /dev/null && echo $CGREEN || echo $CRED)$(unichr 0x00a7)$COFF"
         results+=$(printf " Samba Clients:    $CBLUE%3d$COFF" $(get_samba_connections))
         results+="\n"
     fi
