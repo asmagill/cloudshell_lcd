@@ -31,6 +31,8 @@ TEMPERATURE_FORMAT="F" # So sue me, I'm a philistine
 # Number of screens to cycle through
 MAX_SCREENS=3
 
+CURRENT_SCREEN=0
+
 # External IP Refresh counts
 # The time to update the ip in counts is acquired by using the following formula
 # seconds_to_refresh = EXT_IP_REFRESH * MAX_SCREENS * REFRESH
@@ -44,8 +46,6 @@ COFF=$(faketty tput sgr0)
 CGREEN=$(faketty tput setaf 2)
 CRED=$(faketty tput setaf 1)
 CBLUE=$(faketty tput setaf 6)
-
-CURRENT_SCREEN=0
 
 ext_ip_refresh_c=0
 # this allows testing by outputting directly to the current TTY if no console is specified
@@ -293,6 +293,7 @@ function screen2 {
     results=$(cat /proc/mdstat | tail +2 | head -n -2 | sed -re 's/ +/ /g' \
                                                             -e  's/ = / /g' \
                                                             -e  's/^md/ md/g' \
+                                                            -re 's/\[[0-9]+\]//g' \
                                                             -re 's/ raid[0-9]+/&\n /g' \
                                                             -re 's/ [0-9]+ blocks/ /' \
                                                             -e  's/bitmap/ &/' \
